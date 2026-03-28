@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
+from rich.align import Align
 from rich.console import Console
 from rich.table import Table
 
@@ -417,7 +418,7 @@ def main() -> None:
         show_footer=True,
     )
     table.add_column("Date", style="cyan", footer="TOTAL")
-    table.add_column("# Commits", style="blue", justify="right")
+    table.add_column("Commits", style="blue", justify="right")
     table.add_column("Added", style="green", justify="right")
     table.add_column("Changed", style="yellow", justify="right")
     table.add_column("Deleted", style="red", justify="right")
@@ -431,16 +432,16 @@ def main() -> None:
         totals[1] += c
         totals[2] += d
         totals[3] += n
-        suffix = " [dim](today)[/dim]" if date == today else ""
-        row_style = "dim" if not (a or c or d) else ""
-        table.add_row(str(date) + suffix, str(n) if n else "", f"{a:,}", f"{c:,}", f"{d:,}", style=row_style)
+        date_cell = f"[bold white]{date}[/bold white]" if date == today else str(date)
+        row_style = "bold" if date == today else ("dim" if not (a or c or d) else "")
+        table.add_row(date_cell, str(n) if n else "", f"{a:,}", f"{c:,}", f"{d:,}", style=row_style)
 
     table.columns[1].footer = f"[blue]{totals[3]}[/blue]"
     table.columns[2].footer = f"[green]{totals[0]:,}[/green]"
     table.columns[3].footer = f"[yellow]{totals[1]:,}[/yellow]"
     table.columns[4].footer = f"[red]{totals[2]:,}[/red]"
 
-    console.print(table)
+    console.print(Align.center(table, width=80))
 
     # ---------------------------------------------------------------------------
     # Stats panel — cache column + fetch column side by side
@@ -454,35 +455,32 @@ def main() -> None:
         t.add_column(justify="right")
         return t
 
-    # Left: fetch/activity stats
-    fetch_col = kv_table()
-    if stats.today_from_cache and stats.today_cache_age_s is not None:
-        fetch_col.add_row("Today", f"[green]cached[/green] ({int(stats.today_cache_age_s)}s ago)")
-    else:
-        fetch_col.add_row("Today", "fetched")
+    # Left column
+    left_col = kv_table()
+    left_col.add_row("Total time", f"{elapsed:.1f}s")
+    left_col.add_row("API calls made", str(stats.api_calls))
+    left_col.add_row("Days fetched", str(stats.days_fetched))
+    left_col.add_row("Days from cache", f"[green]{stats.days_from_cache}[/green] / {n_days}")
+
+    # Right column
+    right_col = kv_table()
     if stats.repos_from_cache and stats.repo_cache_age_s is not None:
         age_min = int(stats.repo_cache_age_s // 60)
-        fetch_col.add_row("Repo list", f"[green]cached[/green] ({age_min}m ago)")
+        right_col.add_row("Repo list", f"[green]cached[/green] ({age_min}m)")
     else:
-        fetch_col.add_row("Repo list", "fetched")
-    fetch_col.add_row("Commits processed", str(stats.commits_processed))
-    if stats.commits_skipped:
-        fetch_col.add_row("Commits skipped", f"[yellow]{stats.commits_skipped}[/yellow]")
-
-    # Right: cache stats
-    cache_col = kv_table()
-    cache_col.add_row("Days from cache", f"[green]{stats.days_from_cache}[/green] / {n_days}")
-    cache_col.add_row("Days fetched", str(stats.days_fetched))
-    cache_col.add_row("Cache size on disk", f"{cache_size / 1024:.1f} KB")
-    cache_col.add_row("API calls made", str(stats.api_calls))
-    cache_col.add_row("Total time", f"{elapsed:.1f}s")
+        right_col.add_row("Repo list", "fetched")
+    if stats.today_from_cache and stats.today_cache_age_s is not None:
+        right_col.add_row("Today", f"[green]cached[/green] ({int(stats.today_cache_age_s)}s)")
+    else:
+        right_col.add_row("Today", "fetched")
+    right_col.add_row("|Cache| on disk", f"{cache_size / 1024:.1f} KB")
 
     outer = Table(show_header=False, box=None, padding=(0, 2))
     outer.add_column()
     outer.add_column()
-    outer.add_row(fetch_col, cache_col)
+    outer.add_row(left_col, right_col)
 
-    console.print(outer)
+    console.print(Align.center(outer, width=80))
 
 
 if __name__ == "__main__":
