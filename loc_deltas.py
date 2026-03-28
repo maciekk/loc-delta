@@ -266,6 +266,7 @@ def main() -> None:
     now = datetime.now(timezone.utc)
     today = now.date()
 
+    t_start = now.timestamp()
     console = Console()
     stats = RunStats()
 
@@ -444,6 +445,7 @@ def main() -> None:
     # ---------------------------------------------------------------------------
     # Stats panel — cache column + fetch column side by side
     # ---------------------------------------------------------------------------
+    elapsed = datetime.now(timezone.utc).timestamp() - t_start
     cache_size = cache_file_size(username)
 
     def kv_table() -> Table:
@@ -466,7 +468,6 @@ def main() -> None:
     fetch_col.add_row("Commits processed", str(stats.commits_processed))
     if stats.commits_skipped:
         fetch_col.add_row("Commits skipped", f"[yellow]{stats.commits_skipped}[/yellow]")
-    fetch_col.add_row("Detail threads", str(DETAIL_WORKERS))
 
     # Right: cache stats
     cache_col = kv_table()
@@ -474,6 +475,7 @@ def main() -> None:
     cache_col.add_row("Days fetched", str(stats.days_fetched))
     cache_col.add_row("Cache size on disk", f"{cache_size / 1024:.1f} KB")
     cache_col.add_row("API calls made", str(stats.api_calls))
+    cache_col.add_row("Total time", f"{elapsed:.1f}s")
 
     outer = Table(show_header=False, box=None, padding=(0, 2))
     outer.add_column()
