@@ -15,15 +15,18 @@ Usage:
 Requires GITHUB_TOKEN env var (or rate-limit is 60 req/hour).
 
 Cache lives in ~/.cache/loc-deltas/<username>.json.
-Today's data is never cached (it changes as you commit).
+Past days are cached indefinitely. Today's data is re-used for up to
+TODAY_CACHE_TTL_SECONDS seconds, then re-fetched automatically.
 Use --no-cache to force a full re-fetch of all days.
 """
 
 import json
 import os
 import sys
+import threading
 from collections import defaultdict
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -32,6 +35,8 @@ from rich.console import Console
 from rich.table import Table
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+DETAIL_WORKERS = 10          # parallel threads for commit-detail fetches
+TODAY_CACHE_TTL_SECONDS = 300  # re-fetch today after 5 minutes
 
 
 def headers():
@@ -141,6 +146,8 @@ class RunStats:
     days_fetched: int = 0
     repos_from_cache: bool = False
     repo_cache_age_s: float | None = None
+    today_from_cache: bool = False
+    today_cache_age_s: float | None = None
     api_calls: int = 0
     commits_processed: int = 0
     commits_skipped: int = 0
@@ -268,15 +275,27 @@ def main() -> None:
         )
 
     # Load cache (ignore if --no-cache)
-    cache: dict[str, list[int]] = {} if no_cache else load_cache(username)
+    cache: dict = {} if no_cache else load_cache(username)
     if no_cache:
         console.print("[dim]Cache disabled — fetching all data fresh (including repo list).[/dim]")
+
+    # Check if today's cached data is still fresh
+    today_cached_at = cache.get("_today_cached_at", 0)
+    today_cache_age = now.timestamp() - today_cached_at
+    today_is_fresh = (not no_cache) and (str(today) in cache) and (today_cache_age < TODAY_CACHE_TTL_SECONDS)
+
+    if today_is_fresh:
+        stats.today_from_cache = True
+        stats.today_cache_age_s = today_cache_age
 
     # Determine which days still need fetching
     dates_needed = []
     for i in range(n_days):
         date = today - timedelta(days=i)
-        if date == today or str(date) not in cache:
+        if date == today:
+            if not today_is_fresh:
+                dates_needed.append(date)
+        elif str(date) not in cache:
             dates_needed.append(date)
 
     stats.days_from_cache = n_days - len(dates_needed)
@@ -287,6 +306,8 @@ def main() -> None:
 
     # Seed from cache for days we already have (pad to 4 elements for old caches)
     for date_str, day_stats in cache.items():
+        if date_str.startswith("_"):
+            continue  # skip metadata keys
         padded = list(day_stats) + [0] * (4 - len(day_stats))
         daily[date_str] = padded
 
@@ -318,6 +339,8 @@ def main() -> None:
         dates_needed_set = {str(d) for d in dates_needed}
         n_repos = len(repos)
 
+        # Phase 1: collect all (repo, sha, date_str) needing detail fetches
+        pending: list[tuple[str, str, str]] = []
         for idx, repo in enumerate(repos):
             progress(f"[{idx + 1}/{n_repos}]  {repo['full_name']}")
             try:
@@ -325,27 +348,45 @@ def main() -> None:
             except requests.HTTPError:
                 stats.commits_skipped += 1
                 continue
-
             for commit in commits:
                 date_str = commit["commit"]["author"]["date"]
                 date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+                if str(date) in dates_needed_set:
+                    pending.append((repo["full_name"], commit["sha"], str(date)))
 
-                if str(date) not in dates_needed_set:
-                    continue
+        # Phase 2: fetch commit details in parallel
+        total_pending = len(pending)
+        completed = 0
+        lock = threading.Lock()
 
-                progress(f"[{idx + 1}/{n_repos}]  {repo['full_name']}  {commit['sha'][:7]}")
-                try:
-                    detail = get_commit_detail(repo["full_name"], commit["sha"], stats)
-                except requests.HTTPError:
-                    stats.commits_skipped += 1
-                    continue
+        def fetch_detail(item: tuple[str, str, str]):
+            repo_full_name, sha, date_str = item
+            detail = get_commit_detail(repo_full_name, sha, stats)
+            return date_str, compute_file_stats(detail)
 
-                a, c, d = compute_file_stats(detail)
-                daily[str(date)][0] += a
-                daily[str(date)][1] += c
-                daily[str(date)][2] += d
-                daily[str(date)][3] += 1
-                stats.commits_processed += 1
+        clear_progress()
+        if total_pending:
+            console.print(
+                f"Fetching details for [bold]{total_pending}[/bold] commit(s)"
+                f" ([dim]{DETAIL_WORKERS} threads[/dim])…"
+            )
+            with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as executor:
+                futures = {executor.submit(fetch_detail, item): item for item in pending}
+                for future in as_completed(futures):
+                    try:
+                        date_str, (a, c, d) = future.result()
+                        with lock:
+                            daily[date_str][0] += a
+                            daily[date_str][1] += c
+                            daily[date_str][2] += d
+                            daily[date_str][3] += 1
+                            stats.commits_processed += 1
+                            completed += 1
+                        progress(f"Details  {completed}/{total_pending}")
+                    except requests.HTTPError:
+                        with lock:
+                            stats.commits_skipped += 1
+                            completed += 1
 
         clear_progress()
         console.print(
@@ -353,11 +394,12 @@ def main() -> None:
             + (f", skipped {stats.commits_skipped} due to errors." if stats.commits_skipped else ".")
         )
 
-        # Update cache — persist everything except today
-        updated_cache = dict(cache)
+        # Update cache — past days kept indefinitely; today stamped with fetch time
+        updated_cache = {k: v for k, v in cache.items() if k.startswith("_")}
+        updated_cache.update({k: v for k, v in cache.items() if not k.startswith("_")})
         for date_str in dates_needed_set:
-            if date_str != str(today):
-                updated_cache[date_str] = daily[date_str]
+            updated_cache[date_str] = daily[date_str]
+        updated_cache["_today_cached_at"] = now.timestamp()
         save_cache(username, updated_cache)
 
     else:
@@ -414,6 +456,10 @@ def main() -> None:
     cache_col = kv_table()
     cache_col.add_row("Days from cache", f"[green]{stats.days_from_cache}[/green] / {n_days}")
     cache_col.add_row("Days fetched", str(stats.days_fetched))
+    if stats.today_from_cache and stats.today_cache_age_s is not None:
+        cache_col.add_row("Today", f"[green]cached[/green] ({int(stats.today_cache_age_s)}s ago)")
+    else:
+        cache_col.add_row("Today", "fetched")
     if stats.repos_from_cache and stats.repo_cache_age_s is not None:
         age_min = int(stats.repo_cache_age_s // 60)
         cache_col.add_row("Repo list", f"[green]cached[/green] ({age_min}m ago)")
@@ -427,6 +473,7 @@ def main() -> None:
     fetch_col.add_row("Commits processed", str(stats.commits_processed))
     if stats.commits_skipped:
         fetch_col.add_row("Commits skipped", f"[yellow]{stats.commits_skipped}[/yellow]")
+    fetch_col.add_row("Detail threads", str(DETAIL_WORKERS))
 
     outer = Table(show_header=False, box=None, padding=(0, 2))
     outer.add_column()
