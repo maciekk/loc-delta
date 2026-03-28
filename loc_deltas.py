@@ -44,13 +44,16 @@ def headers():
 # Cache helpers
 # ---------------------------------------------------------------------------
 
-def cache_path(username: str) -> Path:
+REPO_CACHE_TTL_SECONDS = 3600  # re-fetch repo list at most once per hour
+
+
+def cache_dir() -> Path:
     base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return base / "loc-deltas" / f"{username}.json"
+    return base / "loc-deltas"
 
 
 def load_cache(username: str) -> dict:
-    path = cache_path(username)
+    path = cache_dir() / f"{username}.json"
     if path.exists():
         try:
             return json.loads(path.read_text())
@@ -60,9 +63,30 @@ def load_cache(username: str) -> dict:
 
 
 def save_cache(username: str, data: dict) -> None:
-    path = cache_path(username)
+    path = cache_dir() / f"{username}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2))
+
+
+def load_cached_repos(username: str) -> list[dict] | None:
+    """Return cached repo list if it was fetched within the TTL, else None."""
+    path = cache_dir() / f"{username}.repos.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        age = datetime.now(timezone.utc).timestamp() - data["fetched_at"]
+        if age < REPO_CACHE_TTL_SECONDS:
+            return data["repos"]
+    except (json.JSONDecodeError, KeyError, OSError):
+        pass
+    return None
+
+
+def save_cached_repos(username: str, repos: list[dict]) -> None:
+    path = cache_dir() / f"{username}.repos.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"fetched_at": datetime.now(timezone.utc).timestamp(), "repos": repos}))
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +209,7 @@ def main() -> None:
     # Load cache (ignore if --no-cache)
     cache: dict[str, list[int]] = {} if no_cache else load_cache(username)
     if no_cache:
-        console.print("[dim]Cache disabled — fetching all data fresh.[/dim]")
+        console.print("[dim]Cache disabled — fetching all data fresh (including repo list).[/dim]")
 
     # Determine which days still need fetching
     dates_needed = []
@@ -206,19 +230,26 @@ def main() -> None:
         fetch_until = datetime.combine(max(dates_needed), datetime.max.time()).replace(tzinfo=timezone.utc)
 
         cached_count = n_days - len(dates_needed)
-        status_msg = f"Fetching repos for [bold]{username}[/bold]"
-        if cached_count:
-            status_msg += f" ([dim]{cached_count} day(s) from cache[/dim])"
-        status_msg += "…"
+        repos = None if no_cache else load_cached_repos(username)
+        if repos is not None:
+            repo_source = f"[dim](repo list from cache)[/dim]"
+        else:
+            status_msg = f"Fetching repos for [bold]{username}[/bold]"
+            if cached_count:
+                status_msg += f" ([dim]{cached_count} day(s) from cache[/dim])"
+            status_msg += "…"
+            with console.status(status_msg):
+                try:
+                    repos = get_repos(username)
+                except requests.HTTPError as e:
+                    console.print(f"[red]Error fetching repos:[/red] {e}")
+                    sys.exit(1)
+            save_cached_repos(username, repos)
+            repo_source = ""
 
-        with console.status(status_msg):
-            try:
-                repos = get_repos(username)
-            except requests.HTTPError as e:
-                console.print(f"[red]Error fetching repos:[/red] {e}")
-                sys.exit(1)
-
-        console.print(f"Found [bold]{len(repos)}[/bold] repos. Scanning commits…")
+        console.print(
+            f"Found [bold]{len(repos)}[/bold] repos {repo_source}. Scanning commits…"
+        )
 
         dates_needed_set = {str(d) for d in dates_needed}
         total_commits = 0
