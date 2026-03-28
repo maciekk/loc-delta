@@ -400,28 +400,40 @@ def main() -> None:
     console.print(table)
 
     # ---------------------------------------------------------------------------
-    # Cache stats
+    # Stats panel — cache column + fetch column side by side
     # ---------------------------------------------------------------------------
     cache_size = cache_file_size(username)
 
-    stats_table = Table(show_header=False, box=None, padding=(0, 2))
-    stats_table.add_column(style="dim")
-    stats_table.add_column(justify="right")
+    def kv_table() -> Table:
+        t = Table(show_header=False, box=None, padding=(0, 2))
+        t.add_column(style="dim")
+        t.add_column(justify="right")
+        return t
 
-    stats_table.add_row("Days from cache", f"[green]{stats.days_from_cache}[/green] / {n_days}")
-    stats_table.add_row("Days fetched", str(stats.days_fetched))
+    # Left: cache stats
+    cache_col = kv_table()
+    cache_col.add_row("Days from cache", f"[green]{stats.days_from_cache}[/green] / {n_days}")
+    cache_col.add_row("Days fetched", str(stats.days_fetched))
     if stats.repos_from_cache and stats.repo_cache_age_s is not None:
         age_min = int(stats.repo_cache_age_s // 60)
-        stats_table.add_row("Repo list", f"[green]cached[/green] ({age_min}m ago)")
+        cache_col.add_row("Repo list", f"[green]cached[/green] ({age_min}m ago)")
     else:
-        stats_table.add_row("Repo list", "fetched")
-    stats_table.add_row("API calls made", str(stats.api_calls))
-    stats_table.add_row("Commits processed", str(stats.commits_processed))
-    if stats.commits_skipped:
-        stats_table.add_row("Commits skipped", f"[yellow]{stats.commits_skipped}[/yellow]")
-    stats_table.add_row("Cache size on disk", f"{cache_size / 1024:.1f} KB")
+        cache_col.add_row("Repo list", "fetched")
+    cache_col.add_row("Cache size on disk", f"{cache_size / 1024:.1f} KB")
 
-    console.print(stats_table)
+    # Right: fetch/API stats
+    fetch_col = kv_table()
+    fetch_col.add_row("API calls made", str(stats.api_calls))
+    fetch_col.add_row("Commits processed", str(stats.commits_processed))
+    if stats.commits_skipped:
+        fetch_col.add_row("Commits skipped", f"[yellow]{stats.commits_skipped}[/yellow]")
+
+    outer = Table(show_header=False, box=None, padding=(0, 2))
+    outer.add_column()
+    outer.add_column()
+    outer.add_row(cache_col, fetch_col)
+
+    console.print(outer)
 
 
 if __name__ == "__main__":
