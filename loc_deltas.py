@@ -101,6 +101,37 @@ def cache_file_size(username: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# In-place progress line
+# ---------------------------------------------------------------------------
+
+_progress_len = 0
+
+
+def progress(msg: str) -> None:
+    """Overwrite the current terminal line in place."""
+    global _progress_len
+    try:
+        cols = os.get_terminal_size().columns
+    except OSError:
+        cols = 80
+    display = msg[:cols]
+    # Pad to cover any previous longer content
+    padded = display.ljust(max(_progress_len, len(display)))
+    sys.stdout.write(f"\r\033[2m{padded}\033[0m")
+    sys.stdout.flush()
+    _progress_len = len(display)
+
+
+def clear_progress() -> None:
+    """Erase the progress line so the next console.print starts cleanly."""
+    global _progress_len
+    if _progress_len:
+        sys.stdout.write(f"\r{' ' * _progress_len}\r")
+        sys.stdout.flush()
+        _progress_len = 0
+
+
+# ---------------------------------------------------------------------------
 # Stats tracking
 # ---------------------------------------------------------------------------
 
@@ -269,26 +300,26 @@ def main() -> None:
             stats.repo_cache_age_s = repo_cache_age
             repo_source = "[dim](repo list from cache)[/dim]"
         else:
-            status_msg = f"Fetching repos for [bold]{username}[/bold]"
-            if stats.days_from_cache:
-                status_msg += f" ([dim]{stats.days_from_cache} day(s) from cache[/dim])"
-            status_msg += "…"
-            with console.status(status_msg):
-                try:
-                    repos = get_repos(username, stats)
-                except requests.HTTPError as e:
-                    console.print(f"[red]Error fetching repos:[/red] {e}")
-                    sys.exit(1)
+            progress(f"Fetching repo list for {username}…")
+            try:
+                repos = get_repos(username, stats)
+            except requests.HTTPError as e:
+                clear_progress()
+                console.print(f"[red]Error fetching repos:[/red] {e}")
+                sys.exit(1)
             save_cached_repos(username, repos)
             repo_source = ""
 
+        clear_progress()
         console.print(
             f"Found [bold]{len(repos)}[/bold] repos {repo_source}. Scanning commits…"
         )
 
         dates_needed_set = {str(d) for d in dates_needed}
+        n_repos = len(repos)
 
-        for repo in repos:
+        for idx, repo in enumerate(repos):
+            progress(f"[{idx + 1}/{n_repos}]  {repo['full_name']}")
             try:
                 commits = get_commits(repo["full_name"], fetch_since, fetch_until, username, stats)
             except requests.HTTPError:
@@ -302,6 +333,7 @@ def main() -> None:
                 if str(date) not in dates_needed_set:
                     continue
 
+                progress(f"[{idx + 1}/{n_repos}]  {repo['full_name']}  {commit['sha'][:7]}")
                 try:
                     detail = get_commit_detail(repo["full_name"], commit["sha"], stats)
                 except requests.HTTPError:
@@ -315,6 +347,7 @@ def main() -> None:
                 daily[str(date)][3] += 1
                 stats.commits_processed += 1
 
+        clear_progress()
         console.print(
             f"Processed [bold]{stats.commits_processed}[/bold] commit(s)"
             + (f", skipped {stats.commits_skipped} due to errors." if stats.commits_skipped else ".")
@@ -328,6 +361,7 @@ def main() -> None:
         save_cache(username, updated_cache)
 
     else:
+        clear_progress()
         console.print(f"All {n_days} day(s) served from cache.")
 
     console.print()
