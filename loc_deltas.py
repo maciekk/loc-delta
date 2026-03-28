@@ -321,7 +321,7 @@ def main() -> None:
             stats.repo_cache_age_s = repo_cache_age
             repo_source = "[dim](repo list from cache)[/dim]"
         else:
-            progress(f"Fetching repo list for {username}…")
+            progress(f"  Fetching repo list for {username}…")
             try:
                 repos = get_repos(username, stats)
             except requests.HTTPError as e:
@@ -342,7 +342,7 @@ def main() -> None:
         # Phase 1: collect all (repo, sha, date_str) needing detail fetches
         pending: list[tuple[str, str, str]] = []
         for idx, repo in enumerate(repos):
-            progress(f"[{idx + 1}/{n_repos}]  {repo['full_name']}")
+            progress(f"  [{idx + 1}/{n_repos}]  {repo['full_name']}")
             try:
                 commits = get_commits(repo["full_name"], fetch_since, fetch_until, username, stats)
             except requests.HTTPError:
@@ -382,7 +382,7 @@ def main() -> None:
                             daily[date_str][3] += 1
                             stats.commits_processed += 1
                             completed += 1
-                        progress(f"Details  {completed}/{total_pending}")
+                        progress(f"  Details  {completed}/{total_pending}")
                     except requests.HTTPError:
                         with lock:
                             stats.commits_skipped += 1
