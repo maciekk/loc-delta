@@ -2,7 +2,7 @@
 
 Shows daily line-change stats across all your GitHub repos in a terminal table.
 
-<img src="screenshot.png" width="400" alt="screenshot">
+<img src="screenshot.png" width="600" alt="screenshot">
 
 **Column definitions:**
 
