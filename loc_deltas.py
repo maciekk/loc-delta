@@ -251,12 +251,13 @@ def main() -> None:
     stats.days_from_cache = n_days - len(dates_needed)
     stats.days_fetched = len(dates_needed)
 
-    # date -> [added, changed, deleted]
-    daily: dict = defaultdict(lambda: [0, 0, 0])
+    # date -> [added, changed, deleted, commits]
+    daily: dict = defaultdict(lambda: [0, 0, 0, 0])
 
-    # Seed from cache for days we already have
+    # Seed from cache for days we already have (pad to 4 elements for old caches)
     for date_str, day_stats in cache.items():
-        daily[date_str] = list(day_stats)
+        padded = list(day_stats) + [0] * (4 - len(day_stats))
+        daily[date_str] = padded
 
     if dates_needed:
         fetch_since = datetime.combine(min(dates_needed), datetime.min.time()).replace(tzinfo=timezone.utc)
@@ -311,6 +312,7 @@ def main() -> None:
                 daily[str(date)][0] += a
                 daily[str(date)][1] += c
                 daily[str(date)][2] += d
+                daily[str(date)][3] += 1
                 stats.commits_processed += 1
 
         console.print(
@@ -338,25 +340,28 @@ def main() -> None:
         show_footer=True,
     )
     table.add_column("Date", style="cyan", footer="TOTAL")
+    table.add_column("# Commits", style="blue", justify="right")
     table.add_column("Added", style="green", justify="right")
     table.add_column("Changed", style="yellow", justify="right")
     table.add_column("Deleted", style="red", justify="right")
 
-    totals = [0, 0, 0]
+    totals = [0, 0, 0, 0]
 
     for i in range(n_days):
         date = today - timedelta(days=i)
-        a, c, d = daily.get(str(date), [0, 0, 0])
+        a, c, d, n = daily.get(str(date), [0, 0, 0, 0])
         totals[0] += a
         totals[1] += c
         totals[2] += d
+        totals[3] += n
         suffix = " [dim](today)[/dim]" if date == today else ""
         row_style = "dim" if not (a or c or d) else ""
-        table.add_row(str(date) + suffix, f"{a:,}", f"{c:,}", f"{d:,}", style=row_style)
+        table.add_row(str(date) + suffix, str(n) if n else "", f"{a:,}", f"{c:,}", f"{d:,}", style=row_style)
 
-    table.columns[1].footer = f"[green]{totals[0]:,}[/green]"
-    table.columns[2].footer = f"[yellow]{totals[1]:,}[/yellow]"
-    table.columns[3].footer = f"[red]{totals[2]:,}[/red]"
+    table.columns[1].footer = f"[blue]{totals[3]}[/blue]"
+    table.columns[2].footer = f"[green]{totals[0]:,}[/green]"
+    table.columns[3].footer = f"[yellow]{totals[1]:,}[/yellow]"
+    table.columns[4].footer = f"[red]{totals[2]:,}[/red]"
 
     console.print(table)
 
