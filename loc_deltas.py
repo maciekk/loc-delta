@@ -289,11 +289,11 @@ def main() -> None:
         totals[2] += d
         suffix = " [dim](today)[/dim]" if date == today else ""
         row_style = "dim" if not (a or c or d) else ""
-        table.add_row(str(date) + suffix, str(a), str(c), str(d), style=row_style)
+        table.add_row(str(date) + suffix, f"{a:,}", f"{c:,}", f"{d:,}", style=row_style)
 
-    table.columns[1].footer = f"[green]{totals[0]}[/green]"
-    table.columns[2].footer = f"[yellow]{totals[1]}[/yellow]"
-    table.columns[3].footer = f"[red]{totals[2]}[/red]"
+    table.columns[1].footer = f"[green]{totals[0]:,}[/green]"
+    table.columns[2].footer = f"[yellow]{totals[1]:,}[/yellow]"
+    table.columns[3].footer = f"[red]{totals[2]:,}[/red]"
 
     console.print(table)
 
