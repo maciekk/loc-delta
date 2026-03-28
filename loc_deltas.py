@@ -452,33 +452,33 @@ def main() -> None:
         t.add_column(justify="right")
         return t
 
-    # Left: cache stats
-    cache_col = kv_table()
-    cache_col.add_row("Days from cache", f"[green]{stats.days_from_cache}[/green] / {n_days}")
-    cache_col.add_row("Days fetched", str(stats.days_fetched))
+    # Left: fetch/activity stats
+    fetch_col = kv_table()
     if stats.today_from_cache and stats.today_cache_age_s is not None:
-        cache_col.add_row("Today", f"[green]cached[/green] ({int(stats.today_cache_age_s)}s ago)")
+        fetch_col.add_row("Today", f"[green]cached[/green] ({int(stats.today_cache_age_s)}s ago)")
     else:
-        cache_col.add_row("Today", "fetched")
+        fetch_col.add_row("Today", "fetched")
     if stats.repos_from_cache and stats.repo_cache_age_s is not None:
         age_min = int(stats.repo_cache_age_s // 60)
-        cache_col.add_row("Repo list", f"[green]cached[/green] ({age_min}m ago)")
+        fetch_col.add_row("Repo list", f"[green]cached[/green] ({age_min}m ago)")
     else:
-        cache_col.add_row("Repo list", "fetched")
-    cache_col.add_row("Cache size on disk", f"{cache_size / 1024:.1f} KB")
-
-    # Right: fetch/API stats
-    fetch_col = kv_table()
-    fetch_col.add_row("API calls made", str(stats.api_calls))
+        fetch_col.add_row("Repo list", "fetched")
     fetch_col.add_row("Commits processed", str(stats.commits_processed))
     if stats.commits_skipped:
         fetch_col.add_row("Commits skipped", f"[yellow]{stats.commits_skipped}[/yellow]")
     fetch_col.add_row("Detail threads", str(DETAIL_WORKERS))
 
+    # Right: cache stats
+    cache_col = kv_table()
+    cache_col.add_row("Days from cache", f"[green]{stats.days_from_cache}[/green] / {n_days}")
+    cache_col.add_row("Days fetched", str(stats.days_fetched))
+    cache_col.add_row("Cache size on disk", f"{cache_size / 1024:.1f} KB")
+    cache_col.add_row("API calls made", str(stats.api_calls))
+
     outer = Table(show_header=False, box=None, padding=(0, 2))
     outer.add_column()
     outer.add_column()
-    outer.add_row(cache_col, fetch_col)
+    outer.add_row(fetch_col, cache_col)
 
     console.print(outer)
 
