@@ -302,7 +302,8 @@ def main() -> None:
         if date == today:
             if not today_is_fresh:
                 dates_needed.append(date)
-        elif str(date) not in cache:
+        elif str(date) not in cache or isinstance(cache.get(str(date)), list):
+            # Re-fetch legacy entries (plain list = no per-repo breakdown)
             dates_needed.append(date)
 
     stats.days_from_cache = n_days - len(dates_needed)
