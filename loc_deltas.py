@@ -317,8 +317,18 @@ def main() -> None:
     for date_str, day_stats in cache.items():
         if date_str.startswith("_"):
             continue  # skip metadata keys
-        padded = list(day_stats) + [0] * (4 - len(day_stats))
-        daily[date_str] = padded
+
+        # Handle both legacy array format and new dict format with per-repo data
+        if isinstance(day_stats, list):
+            # Legacy format: [a, c, d, n]
+            padded = list(day_stats) + [0] * (4 - len(day_stats))
+            daily[date_str] = padded
+        else:
+            # New format: {"_total": [a, c, d, n], "repo1": [...], ...}
+            daily[date_str] = day_stats.get("_total", [0, 0, 0, 0])
+            for repo_name, repo_stats in day_stats.items():
+                if not repo_name.startswith("_"):
+                    daily_by_repo[date_str][repo_name] = repo_stats
 
     if dates_needed:
         fetch_since = datetime.combine(min(dates_needed), datetime.min.time()).replace(tzinfo=local_tz)
@@ -411,7 +421,11 @@ def main() -> None:
         updated_cache = {k: v for k, v in cache.items() if k.startswith("_")}
         updated_cache.update({k: v for k, v in cache.items() if not k.startswith("_")})
         for date_str in dates_needed_set:
-            updated_cache[date_str] = daily[date_str]
+            # Store both aggregated total and per-repo breakdown
+            updated_cache[date_str] = {
+                "_total": daily[date_str],
+                **daily_by_repo[date_str]
+            }
         updated_cache["_today_cached_at"] = now.timestamp()
         save_cache(username, updated_cache)
 
