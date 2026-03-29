@@ -4,6 +4,10 @@ Shows daily line-change stats across all your GitHub repos in a terminal table.
 
 <img src="screenshot.png" width="600" alt="screenshot">
 
+And with `--extra`:
+
+<img src="screenshot-extra.png" width="600" alt="screenshot">
+
 **Column definitions:**
 
 - **Added** — truly new lines (no corresponding deletion in the same file)
