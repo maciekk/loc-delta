@@ -1,0 +1,13 @@
+# --- Python & Tooling ---
+.venv/
+__pycache__/
+*.pyc
+.uv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- Environment & Secrets ---
+.env
+.env.*
+secrets.yaml
