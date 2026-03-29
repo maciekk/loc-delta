@@ -235,10 +235,11 @@ def compute_file_stats(detail: dict) -> tuple[int, int, int]:
 # Argument parsing
 # ---------------------------------------------------------------------------
 
-def parse_args(argv: list[str]) -> tuple[int, str, bool]:
+def parse_args(argv: list[str]) -> tuple[int, str, bool, bool]:
     n_days = 7
     username = "maciekk"
     no_cache = False
+    extra = False
     i = 1
     while i < len(argv):
         if argv[i] == "--user" and i + 1 < len(argv):
@@ -247,6 +248,9 @@ def parse_args(argv: list[str]) -> tuple[int, str, bool]:
         elif argv[i] == "--no-cache":
             no_cache = True
             i += 1
+        elif argv[i] == "--extra":
+            extra = True
+            i += 1
         else:
             try:
                 n_days = int(argv[i])
@@ -254,7 +258,7 @@ def parse_args(argv: list[str]) -> tuple[int, str, bool]:
                 print(f"Unknown argument: {argv[i]}", file=sys.stderr)
                 sys.exit(1)
             i += 1
-    return n_days, username, no_cache
+    return n_days, username, no_cache, extra
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +266,7 @@ def parse_args(argv: list[str]) -> tuple[int, str, bool]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    n_days, username, no_cache = parse_args(sys.argv)
+    n_days, username, no_cache, extra = parse_args(sys.argv)
 
     local_tz = datetime.now().astimezone().tzinfo
     now = datetime.now(local_tz)
@@ -306,6 +310,8 @@ def main() -> None:
 
     # date -> [added, changed, deleted, commits]
     daily: dict = defaultdict(lambda: [0, 0, 0, 0])
+    # date -> {repo -> [added, changed, deleted, commits]}
+    daily_by_repo: dict = defaultdict(lambda: defaultdict(lambda: [0, 0, 0, 0]))
 
     # Seed from cache for days we already have (pad to 4 elements for old caches)
     for date_str, day_stats in cache.items():
@@ -365,7 +371,7 @@ def main() -> None:
         def fetch_detail(item: tuple[str, str, str]):
             repo_full_name, sha, date_str = item
             detail = get_commit_detail(repo_full_name, sha, stats)
-            return date_str, compute_file_stats(detail)
+            return date_str, repo_full_name, compute_file_stats(detail)
 
         clear_progress()
         if total_pending:
@@ -377,12 +383,16 @@ def main() -> None:
                 futures = {executor.submit(fetch_detail, item): item for item in pending}
                 for future in as_completed(futures):
                     try:
-                        date_str, (a, c, d) = future.result()
+                        date_str, repo_full_name, (a, c, d) = future.result()
                         with lock:
                             daily[date_str][0] += a
                             daily[date_str][1] += c
                             daily[date_str][2] += d
                             daily[date_str][3] += 1
+                            daily_by_repo[date_str][repo_full_name][0] += a
+                            daily_by_repo[date_str][repo_full_name][1] += c
+                            daily_by_repo[date_str][repo_full_name][2] += d
+                            daily_by_repo[date_str][repo_full_name][3] += 1
                             stats.commits_processed += 1
                             completed += 1
                         progress(f"  Details  {completed}/{total_pending}")
@@ -423,6 +433,8 @@ def main() -> None:
     table.add_column("Added", style="green", justify="right")
     table.add_column("Changed", style="yellow", justify="right")
     table.add_column("Deleted", style="red", justify="right")
+    if extra:
+        table.add_column("Repo", style="magenta")
 
     totals = [0, 0, 0, 0]
 
@@ -435,7 +447,18 @@ def main() -> None:
         totals[3] += n
         date_cell = f"[bold white]{date}[/bold white]" if date == today else str(date)
         row_style = "bold" if date == today else ("dim" if not (a or c or d) else "")
-        table.add_row(date_cell, str(n) if n else "", f"{a:,}", f"{c:,}", f"{d:,}", style=row_style)
+
+        if extra:
+            table.add_row(date_cell, str(n) if n else "", f"{a:,}", f"{c:,}", f"{d:,}", "", style=row_style)
+            repos_by_activity = sorted(
+                daily_by_repo[str(date)].items(),
+                key=lambda x: sum(x[1]),
+                reverse=True
+            )
+            for repo_name, (repo_a, repo_c, repo_d, repo_n) in repos_by_activity:
+                table.add_row("", str(repo_n) if repo_n else "", f"{repo_a:,}", f"{repo_c:,}", f"{repo_d:,}", repo_name, style="dim")
+        else:
+            table.add_row(date_cell, str(n) if n else "", f"{a:,}", f"{c:,}", f"{d:,}", style=row_style)
 
     table.columns[1].footer = f"[blue]{totals[3]}[/blue]"
     table.columns[2].footer = f"[green]{totals[0]:,}[/green]"
