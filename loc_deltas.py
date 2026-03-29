@@ -264,7 +264,8 @@ def parse_args(argv: list[str]) -> tuple[int, str, bool]:
 def main() -> None:
     n_days, username, no_cache = parse_args(sys.argv)
 
-    now = datetime.now(timezone.utc)
+    local_tz = datetime.now().astimezone().tzinfo
+    now = datetime.now(local_tz)
     today = now.date()
 
     t_start = now.timestamp()
@@ -314,8 +315,8 @@ def main() -> None:
         daily[date_str] = padded
 
     if dates_needed:
-        fetch_since = datetime.combine(min(dates_needed), datetime.min.time()).replace(tzinfo=timezone.utc)
-        fetch_until = datetime.combine(max(dates_needed), datetime.max.time()).replace(tzinfo=timezone.utc)
+        fetch_since = datetime.combine(min(dates_needed), datetime.min.time()).replace(tzinfo=local_tz)
+        fetch_until = datetime.combine(max(dates_needed), datetime.max.time()).replace(tzinfo=local_tz)
 
         repos, repo_cache_age = (None, None) if no_cache else load_cached_repos(username)
         if repos is not None:
@@ -352,7 +353,7 @@ def main() -> None:
                 continue
             for commit in commits:
                 date_str = commit["commit"]["author"]["date"]
-                date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+                date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).astimezone(local_tz).date()
                 if str(date) in dates_needed_set:
                     pending.append((repo["full_name"], commit["sha"], str(date)))
 
