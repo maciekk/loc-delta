@@ -456,7 +456,14 @@ def main() -> None:
                 reverse=True
             )
             for repo_name, (repo_a, repo_c, repo_d, repo_n) in repos_by_activity:
-                table.add_row("", str(repo_n) if repo_n else "", f"{repo_a:,}", f"{repo_c:,}", f"{repo_d:,}", repo_name, style="dim")
+                table.add_row(
+                    "",
+                    f"[dim blue]{repo_n}[/dim blue]" if repo_n else "",
+                    f"[dim green]{repo_a:,}[/dim green]",
+                    f"[dim yellow]{repo_c:,}[/dim yellow]",
+                    f"[dim red]{repo_d:,}[/dim red]",
+                    f"[dim]{repo_name}[/dim]"
+                )
         else:
             table.add_row(date_cell, str(n) if n else "", f"{a:,}", f"{c:,}", f"{d:,}", style=row_style)
 
